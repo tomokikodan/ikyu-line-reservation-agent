@@ -1,9 +1,9 @@
 import type { Repositories } from "../db/repositories.js";
-import { formatBookingHandoff, formatCandidates } from "../line/messages.js";
+import { formatBookingHandoff, formatCandidates, formatSearchProgress } from "../line/messages.js";
 import type { LineClient } from "../line/client.js";
 import type { AiService } from "../openai/service.js";
 import type { IkyuRestaurantBrowser } from "../playwright/ikyu.js";
-import type { Candidate, ReservationIntent, SearchJob } from "../types.js";
+import type { Candidate, ReservationIntent, SearchJob, SearchProgress } from "../types.js";
 
 interface SearchTask {
   job: SearchJob;
@@ -74,10 +74,22 @@ export class JobQueue {
     });
 
     try {
-      const searchResult = await this.deps.ikyu.search(job.intent, job.id);
+      const searchResult = await this.deps.ikyu.search(job.intent, job.id, async (progress) => {
+        await this.pushSearchProgress(job, progress);
+      });
+      await this.pushSearchProgress(job, {
+        stage: "candidate_ranking",
+        message: `${searchResult.candidates.length}件の候補を取得しました。OpenAIで条件に合う5件へ絞り込んでいます。`,
+        details: { candidateCount: searchResult.candidates.length }
+      });
       const ranked = await this.deps.ai.rankCandidates({
         intent: job.intent,
         candidates: searchResult.candidates
+      });
+      await this.pushSearchProgress(job, {
+        stage: "reply_preparing",
+        message: "候補の理由を整理して、LINE返信を作成しています。",
+        details: { rankedCount: ranked.length }
       });
       const savedCandidates = await this.deps.repos.saveRankedCandidates(job.id, ranked);
       await this.deps.repos.updateSearchJob({ id: job.id, status: "completed" });
@@ -113,6 +125,26 @@ export class JobQueue {
         eventType: "search_failed",
         details: { jobId: job.id, error: message, artifact }
       });
+    }
+  }
+
+  private async pushSearchProgress(job: SearchJob, progress: SearchProgress): Promise<void> {
+    try {
+      await this.deps.line.push(job.lineUserId, [{ type: "text", text: formatSearchProgress(progress) }]);
+      await this.deps.repos.appendMessage({
+        lineUserId: job.lineUserId,
+        direction: "outbound",
+        messageType: "text",
+        text: formatSearchProgress(progress),
+        rawPayload: { jobId: job.id, progress }
+      });
+      await this.deps.repos.appendAuditLog({
+        lineUserId: job.lineUserId,
+        eventType: "search_progress",
+        details: { jobId: job.id, ...progress }
+      });
+    } catch (error) {
+      console.warn("Failed to push search progress", error);
     }
   }
 

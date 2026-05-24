@@ -60,6 +60,18 @@ export interface SearchJob {
   failureArtifact?: unknown;
 }
 
+export interface SearchProgress {
+  stage:
+    | "browser_launching"
+    | "site_opening"
+    | "search_form_filling"
+    | "candidate_extracting"
+    | "candidate_ranking"
+    | "reply_preparing";
+  message: string;
+  details?: unknown;
+}
+
 export interface BookingResult {
   status: BookingAttemptStatus;
   stopReason: string;

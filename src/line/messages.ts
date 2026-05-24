@@ -1,4 +1,4 @@
-import type { Candidate, MissingField, RankedCandidate, ReservationIntent } from "../types.js";
+import type { Candidate, MissingField, RankedCandidate, ReservationIntent, SearchProgress } from "../types.js";
 
 const fieldQuestions: Record<MissingField, string> = {
   date: "ご希望の日付を教えてください。例: 6月15日、来週金曜",
@@ -16,7 +16,11 @@ export function formatSearchStarted(intent: ReservationIntent): string {
   const time = intent.time ?? "時間未指定";
   const people = intent.partySize ? `${intent.partySize}名` : "人数未指定";
   const area = intent.area ?? "エリア未指定";
-  return `条件を確認しました。\n${date} ${time} / ${people} / ${area}\n一休レストランで空席候補を検索します。少しお待ちください。`;
+  return `条件を確認しました。\n${date} ${time} / ${people} / ${area}\n一休レストランで空席候補を検索します。進捗もこのトークに表示します。`;
+}
+
+export function formatSearchProgress(progress: SearchProgress): string {
+  return `処理中: ${progress.message}`;
 }
 
 export function formatCandidates(candidates: RankedCandidate[] | Candidate[]): string {

@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { config } from "../config.js";
-import type { BookingResult, Candidate, ReservationIntent } from "../types.js";
+import type { BookingResult, Candidate, ReservationIntent, SearchProgress } from "../types.js";
 import { detectUnsafeBookingText } from "./safety.js";
 
 const IKYU_TOP_URL = "https://restaurant.ikyu.com/";
@@ -13,8 +13,18 @@ export interface IkyuSearchResult {
   artifact?: unknown;
 }
 
+export type SearchProgressReporter = (progress: SearchProgress) => Promise<void> | void;
+
 export class IkyuRestaurantBrowser {
-  async search(intent: ReservationIntent, jobId: string): Promise<IkyuSearchResult> {
+  async search(
+    intent: ReservationIntent,
+    jobId: string,
+    onProgress?: SearchProgressReporter
+  ): Promise<IkyuSearchResult> {
+    await this.reportProgress(onProgress, {
+      stage: "browser_launching",
+      message: "検索用ブラウザを起動しています。Render無料プランではここで少し待つことがあります。"
+    });
     const browser = await this.launch();
     const page = await browser.newPage({
       viewport: { width: 1365, height: 900 },
@@ -24,12 +34,24 @@ export class IkyuRestaurantBrowser {
 
     try {
       page.setDefaultTimeout(config.SEARCH_TIMEOUT_MS);
+      await this.reportProgress(onProgress, {
+        stage: "site_opening",
+        message: "一休レストランを開いています。"
+      });
       await page.goto(IKYU_TOP_URL, { waitUntil: "domcontentloaded" });
       await this.acceptOptionalDialogs(page);
+      await this.reportProgress(onProgress, {
+        stage: "search_form_filling",
+        message: "希望条件を一休レストランの検索画面に入力しています。"
+      });
       await this.fillSearch(page, intent);
       await page.waitForLoadState("domcontentloaded");
       await page.waitForTimeout(1500);
 
+      await this.reportProgress(onProgress, {
+        stage: "candidate_extracting",
+        message: "検索結果から店名、価格、エリア、空席情報を読み取っています。"
+      });
       const candidates = await this.extractCandidates(page);
       if (candidates.length === 0) {
         const artifact = await this.saveFailureArtifact(page, jobId, "no_candidates");
@@ -42,6 +64,15 @@ export class IkyuRestaurantBrowser {
       throw Object.assign(error instanceof Error ? error : new Error(String(error)), { artifact });
     } finally {
       await browser.close();
+    }
+  }
+
+  private async reportProgress(onProgress: SearchProgressReporter | undefined, progress: SearchProgress): Promise<void> {
+    if (!onProgress) return;
+    try {
+      await onProgress(progress);
+    } catch (error) {
+      console.warn("Failed to report search progress", error);
     }
   }
 
