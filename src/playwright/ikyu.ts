@@ -269,7 +269,42 @@ export class IkyuRestaurantBrowser {
           return true;
         });
 
-      return [...candidatesFromCards, ...candidatesFromLinks]
+      const html = document.documentElement.innerHTML;
+      const serializedRestaurantPattern =
+        /"restaurantId","(?<id>\d+)"(?<chunk>[\s\S]{0,2500}?)(?="restaurantId"|<\/script>|$)/g;
+      const candidatesFromSerializedData = Array.from(html.matchAll(serializedRestaurantPattern))
+        .map((match) => {
+          const groups = match.groups ?? {};
+          const decode = (value?: string) =>
+            normalize(
+              (value ?? "")
+                .replace(/\\"/g, '"')
+                .replace(/\\u002F/g, "/")
+                .replace(/\\\\/g, "\\")
+            );
+          const chunk = groups.chunk ?? "";
+          const extract = (pattern: RegExp) => decode(chunk.match(pattern)?.[1]);
+          const id = groups.id;
+          const name = extract(/"name","((?:\\.|[^"\\])*)"/);
+          const genre = extract(/"displayName","((?:\\.|[^"\\])*)"/);
+          const area = extract(/"area",\{[\s\S]{0,120}?\},"((?:\\.|[^"\\])*)","mediumName"/);
+          return {
+            name,
+            url: id ? new URL(`/${id}/`, location.origin).toString() : "",
+            availability: "不明",
+            price: null,
+            genre: genre || null,
+            area: area || null,
+            extractionNote: normalize(match[0]).slice(0, 300)
+          };
+        })
+        .filter((candidate) => {
+          if (!candidate.name || !candidate.url || seen.has(candidate.url)) return false;
+          seen.add(candidate.url);
+          return true;
+        });
+
+      return [...candidatesFromCards, ...candidatesFromLinks, ...candidatesFromSerializedData]
         .map((card) => {
           const name = card.name.replace(/^一休\.comレストラン\s*/, "");
           return { ...card, name };
