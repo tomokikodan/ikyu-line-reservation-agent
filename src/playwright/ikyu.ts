@@ -225,10 +225,11 @@ export class IkyuRestaurantBrowser {
       const seen = new Set<string>();
 
       const fromCard = (card: Element) => {
-        const link = Array.from(card.querySelectorAll("a")).find((anchor) => {
+        const restaurantLinks = Array.from(card.querySelectorAll("a")).filter((anchor) => {
           const href = anchor.getAttribute("href") ?? "";
           return restaurantHrefPattern.test(href);
         });
+        const link = restaurantLinks.find((anchor) => normalize(anchor.textContent)) ?? restaurantLinks[0];
         const href = link?.getAttribute("href");
         const url = href ? new URL(href, location.origin).toString() : "";
         const heading =
@@ -270,9 +271,10 @@ export class IkyuRestaurantBrowser {
         });
 
       const html = document.documentElement.innerHTML;
+      const serializedText = html.replace(/\\"/g, '"').replace(/\\u002F/g, "/").replace(/\\\\/g, "\\");
       const serializedRestaurantPattern =
-        /"restaurantId","(?<id>\d+)"(?<chunk>[\s\S]{0,2500}?)(?="restaurantId"|<\/script>|$)/g;
-      const candidatesFromSerializedData = Array.from(html.matchAll(serializedRestaurantPattern))
+        /"restaurantId","(?<id>\d+)"(?<chunk>[\s\S]{0,2500})/g;
+      const candidatesFromSerializedData = Array.from(serializedText.matchAll(serializedRestaurantPattern))
         .map((match) => {
           const groups = match.groups ?? {};
           const decode = (value?: string) =>
@@ -286,8 +288,10 @@ export class IkyuRestaurantBrowser {
           const extract = (pattern: RegExp) => decode(chunk.match(pattern)?.[1]);
           const id = groups.id;
           const name = extract(/"name","((?:\\.|[^"\\])*)"/);
-          const genre = extract(/"displayName","((?:\\.|[^"\\])*)"/);
-          const area = extract(/"area",\{[\s\S]{0,120}?\},"((?:\\.|[^"\\])*)","mediumName"/);
+          const genre = extract(/"genre",\{[\s\S]{0,160}?"displayName","((?:\\.|[^"\\])*)"/);
+          const area =
+            extract(/"area",\{[\s\S]{0,200}?\},"((?:\\.|[^"\\])*)","mediumName"/) ||
+            extract(/"area",\{[\s\S]{0,200}?"displayName","((?:\\.|[^"\\])*)"/);
           return {
             name,
             url: id ? new URL(`/${id}/`, location.origin).toString() : "",
