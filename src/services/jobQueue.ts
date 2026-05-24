@@ -15,9 +15,12 @@ interface BookingTask {
   intent: ReservationIntent;
 }
 
+const SEARCH_PROGRESS_PUSH_INTERVAL_MS = 60_000;
+
 export class JobQueue {
   private readonly searchQueue: SearchTask[] = [];
   private readonly bookingQueue: BookingTask[] = [];
+  private readonly lastProgressPushedAt = new Map<string, number>();
   private running = 0;
 
   constructor(
@@ -67,6 +70,7 @@ export class JobQueue {
 
   private async runSearch(job: SearchJob): Promise<void> {
     await this.deps.repos.updateSearchJob({ id: job.id, status: "running" });
+    this.lastProgressPushedAt.set(job.id, Date.now());
     await this.deps.repos.appendAuditLog({
       lineUserId: job.lineUserId,
       eventType: "search_started",
@@ -125,10 +129,23 @@ export class JobQueue {
         eventType: "search_failed",
         details: { jobId: job.id, error: message, artifact }
       });
+    } finally {
+      this.lastProgressPushedAt.delete(job.id);
     }
   }
 
   private async pushSearchProgress(job: SearchJob, progress: SearchProgress): Promise<void> {
+    const now = Date.now();
+    const lastPushedAt = this.lastProgressPushedAt.get(job.id) ?? 0;
+    if (now - lastPushedAt < SEARCH_PROGRESS_PUSH_INTERVAL_MS) {
+      await this.deps.repos.appendAuditLog({
+        lineUserId: job.lineUserId,
+        eventType: "search_progress_skipped",
+        details: { jobId: job.id, reason: "throttled", ...progress }
+      });
+      return;
+    }
+    this.lastProgressPushedAt.set(job.id, now);
     try {
       await this.deps.line.push(job.lineUserId, [{ type: "text", text: formatSearchProgress(progress) }]);
       await this.deps.repos.appendMessage({
