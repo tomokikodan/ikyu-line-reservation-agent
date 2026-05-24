@@ -95,7 +95,8 @@ export function createApp(deps?: {
   });
 
   app.get("/admin/jobs/:id", express.json(), async (req: Request, res: Response) => {
-    const token = req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? req.query.token;
+    const queryToken = typeof req.query.token === "string" ? req.query.token : undefined;
+    const token = req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? queryToken;
     if (!config.ADMIN_TOKEN || token !== config.ADMIN_TOKEN) {
       res.status(401).json({ ok: false });
       return;
