@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: ikyu-line-reservation-agent
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PLAYWRIGHT_HEADLESS
+        value: "true"
+      - key: OPENAI_MODEL
+        value: gpt-5.4-mini
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ikyu-line-agent-db
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+databases:
+  - name: ikyu-line-agent-db
+    plan: starter
