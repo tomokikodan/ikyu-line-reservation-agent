@@ -3,7 +3,7 @@ import { formatBookingHandoff, formatCandidates, formatSearchProgress } from "..
 import type { LineClient } from "../line/client.js";
 import type { AiService } from "../openai/service.js";
 import type { IkyuRestaurantBrowser } from "../playwright/ikyu.js";
-import type { Candidate, ReservationIntent, SearchJob, SearchProgress } from "../types.js";
+import type { Candidate, RankedCandidate, ReservationIntent, SearchJob, SearchProgress } from "../types.js";
 
 interface SearchTask {
   job: SearchJob;
@@ -86,16 +86,38 @@ export class JobQueue {
         message: `${searchResult.candidates.length}件の候補を取得しました。OpenAIで条件に合う5件へ絞り込んでいます。`,
         details: { candidateCount: searchResult.candidates.length }
       });
-      const ranked = await this.deps.ai.rankCandidates({
-        intent: job.intent,
-        candidates: searchResult.candidates
-      });
+      let ranked: RankedCandidate[] = [];
+      try {
+        ranked = await this.deps.ai.rankCandidates({
+          intent: job.intent,
+          candidates: searchResult.candidates
+        });
+      } catch (error) {
+        await this.deps.repos.appendAuditLog({
+          lineUserId: job.lineUserId,
+          eventType: "ranking_failed_fallback",
+          details: {
+            jobId: job.id,
+            error: error instanceof Error ? error.message : String(error),
+            extractedCandidateCount: searchResult.candidates.length
+          }
+        });
+      }
+      const candidatesToSave =
+        ranked.length > 0 ? ranked : this.fallbackRankCandidates(job.intent, searchResult.candidates);
+      if (ranked.length === 0 && searchResult.candidates.length > 0) {
+        await this.deps.repos.appendAuditLog({
+          lineUserId: job.lineUserId,
+          eventType: "ranking_empty_fallback",
+          details: { jobId: job.id, extractedCandidateCount: searchResult.candidates.length }
+        });
+      }
       await this.pushSearchProgress(job, {
         stage: "reply_preparing",
         message: "候補の理由を整理して、LINE返信を作成しています。",
-        details: { rankedCount: ranked.length }
+        details: { rankedCount: candidatesToSave.length }
       });
-      const savedCandidates = await this.deps.repos.saveRankedCandidates(job.id, ranked);
+      const savedCandidates = await this.deps.repos.saveRankedCandidates(job.id, candidatesToSave);
       await this.deps.repos.updateSearchJob({ id: job.id, status: "completed" });
       await this.deps.repos.updateConversation({
         lineUserId: job.lineUserId,
@@ -132,6 +154,20 @@ export class JobQueue {
     } finally {
       this.lastProgressPushedAt.delete(job.id);
     }
+  }
+
+  private fallbackRankCandidates(intent: ReservationIntent, candidates: Candidate[]): RankedCandidate[] {
+    return candidates.slice(0, 5).map((candidate, index) => ({
+      ...candidate,
+      rank: index + 1,
+      availability: candidate.availability ?? "不明",
+      evaluationReason:
+        candidate.evaluationReason ??
+        ([intent.area ? `${intent.area}周辺の候補` : undefined, intent.genre ? `${intent.genre}条件に関連` : undefined]
+          .filter(Boolean)
+          .join("、") ||
+          "一休レストランの検索結果に含まれていた候補です。")
+    }));
   }
 
   private async pushSearchProgress(job: SearchJob, progress: SearchProgress): Promise<void> {

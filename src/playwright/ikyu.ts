@@ -52,7 +52,12 @@ export class IkyuRestaurantBrowser {
         stage: "candidate_extracting",
         message: "検索結果から店名、価格、エリア、空席情報を読み取っています。"
       });
-      const candidates = await this.extractCandidates(page);
+      let candidates = await this.extractCandidates(page);
+      if (candidates.length === 0) {
+        await this.openKeywordSearch(page, intent);
+        await page.waitForTimeout(1500);
+        candidates = await this.extractCandidates(page);
+      }
       if (candidates.length === 0) {
         const artifact = await this.saveFailureArtifact(page, jobId, "no_candidates");
         return { candidates: [], artifact };
@@ -180,8 +185,8 @@ export class IkyuRestaurantBrowser {
     }
 
     const query = new URLSearchParams();
-    if (intent.area) query.set("kwd", intent.area);
-    if (intent.genre) query.set("genre", intent.genre);
+    const keyword = this.keywordForIntent(intent);
+    if (keyword) query.set("kwd", keyword);
     await page.goto(`${IKYU_TOP_URL}search/?${query.toString()}`, { waitUntil: "domcontentloaded" });
   }
 
@@ -202,53 +207,87 @@ export class IkyuRestaurantBrowser {
   private async extractCandidates(page: Page): Promise<Candidate[]> {
     const candidates = await page.evaluate(() => {
       const normalize = (value?: string | null) => (value ?? "").replace(/\s+/g, " ").trim();
+      const restaurantHrefPattern = /(?:^\/(?:restaurant\/)?\d+\/?|restaurant\.ikyu\.com\/(?:restaurant\/)?\d+)/;
       const cardSelectors = [
         '[data-testid*="restaurant"]',
         '[class*="restaurant"]',
         '[class*="Restaurant"]',
+        '[class*="plan"]',
+        '[class*="Plan"]',
+        '[class*="shop"]',
+        '[class*="Shop"]',
         '[class*="store"]',
+        '[class*="Store"]',
         "article",
         "li"
       ];
       const cards = Array.from(document.querySelectorAll(cardSelectors.join(","))).slice(0, 80);
       const seen = new Set<string>();
 
-      return cards
-        .map((card) => {
-          const link = Array.from(card.querySelectorAll("a")).find((anchor) => {
-            const href = anchor.getAttribute("href") ?? "";
-            return href.includes("restaurant.ikyu.com") || /^\/\d+/.test(href) || href.includes("/restaurant/");
-          });
-          const href = link?.getAttribute("href");
-          const url = href ? new URL(href, location.origin).toString() : "";
-          const heading =
-            card.querySelector("h2,h3,[class*=name],[class*=Name]")?.textContent ??
-            link?.textContent ??
-            "";
-          const text = normalize(card.textContent);
-          const price = text.match(/￥[\d,]+(?:\s*[〜~-]\s*￥?[\d,]+)?/)?.[0];
-          const availability =
-            text.match(/空席あり|予約可|残り\d+席|満席|空席なし/)?.[0] ?? "不明";
-          const genre = text.match(/(和食|鮨|寿司|イタリアン|フレンチ|中国料理|中華|焼肉|鉄板焼|懐石|割烹|ビュッフェ|洋食)/)?.[0];
-          const area = text.match(/(銀座|新宿|渋谷|六本木|恵比寿|丸の内|東京|表参道|青山|品川|横浜|京都|大阪|神戸)/)?.[0];
-          return {
-            name: normalize(heading),
-            url,
-            availability,
-            price,
-            genre,
-            area,
-            extractionNote: text.slice(0, 300)
-          };
-        })
+      const fromCard = (card: Element) => {
+        const link = Array.from(card.querySelectorAll("a")).find((anchor) => {
+          const href = anchor.getAttribute("href") ?? "";
+          return restaurantHrefPattern.test(href);
+        });
+        const href = link?.getAttribute("href");
+        const url = href ? new URL(href, location.origin).toString() : "";
+        const heading =
+          card.querySelector("h1,h2,h3,[class*=name],[class*=Name],[class*=title],[class*=Title]")?.textContent ??
+          link?.textContent ??
+          "";
+        const text = normalize(card.textContent);
+        const price = text.match(/(?:￥|¥)[\d,]+(?:\s*[〜~-]\s*(?:￥|¥)?[\d,]+)?|[\d,]+円(?:\s*[〜~-]\s*[\d,]+円)?/)?.[0];
+        const availability =
+          text.match(/空席あり|予約可|残り\d+席|リクエスト予約|即予約|満席|空席なし/)?.[0] ?? "不明";
+        const genre = text.match(/(和食|鮨|寿司|イタリアン|フレンチ|中国料理|中華|焼肉|鉄板焼|懐石|割烹|ビュッフェ|洋食|ワインバー|バー|スペイン料理|ステーキ)/)?.[0];
+        const area = text.match(/(豊田|豊田市|名古屋|栄|伏見|愛知|銀座|新宿|渋谷|六本木|恵比寿|丸の内|東京|表参道|青山|品川|横浜|京都|大阪|神戸)/)?.[0];
+        return {
+          name: normalize(heading),
+          url,
+          availability,
+          price,
+          genre,
+          area,
+          extractionNote: text.slice(0, 300)
+        };
+      };
+
+      const candidatesFromCards = cards
+        .map(fromCard)
         .filter((candidate) => {
           if (!candidate.name || !candidate.url || seen.has(candidate.url)) return false;
           seen.add(candidate.url);
           return true;
         });
+
+      const candidatesFromLinks = Array.from(document.querySelectorAll("a"))
+        .filter((anchor) => restaurantHrefPattern.test(anchor.getAttribute("href") ?? ""))
+        .map((anchor) => fromCard(anchor.closest("article,li,section,div") ?? anchor))
+        .filter((candidate) => {
+          if (!candidate.name || !candidate.url || seen.has(candidate.url)) return false;
+          seen.add(candidate.url);
+          return true;
+        });
+
+      return [...candidatesFromCards, ...candidatesFromLinks]
+        .map((card) => {
+          const name = card.name.replace(/^一休\.comレストラン\s*/, "");
+          return { ...card, name };
+        });
     });
 
     return candidates;
+  }
+
+  private async openKeywordSearch(page: Page, intent: ReservationIntent): Promise<void> {
+    const query = new URLSearchParams();
+    const keyword = this.keywordForIntent(intent);
+    if (keyword) query.set("kwd", keyword);
+    await page.goto(`${IKYU_TOP_URL}search/?${query.toString()}`, { waitUntil: "domcontentloaded" });
+  }
+
+  private keywordForIntent(intent: ReservationIntent): string {
+    return [intent.area, intent.genre, ...(intent.preferences ?? [])].filter(Boolean).join(" ");
   }
 
   private async trySelectReservationInputs(page: Page, intent: ReservationIntent): Promise<void> {
