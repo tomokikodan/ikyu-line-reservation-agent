@@ -12,13 +12,13 @@ export type BookingAttemptStatus = "stopped_for_user" | "failed";
 export type MissingField = "date" | "time" | "partySize" | "area";
 
 export interface ReservationIntent {
-  date?: string;
-  time?: string;
-  partySize?: number;
-  area?: string;
-  genre?: string;
-  occasion?: string;
-  budgetPerPerson?: number;
+  date?: string | null;
+  time?: string | null;
+  partySize?: number | null;
+  area?: string | null;
+  genre?: string | null;
+  occasion?: string | null;
+  budgetPerPerson?: number | null;
   preferences: string[];
   missingFields: MissingField[];
   originalText: string;
@@ -30,10 +30,10 @@ export interface Candidate {
   name: string;
   url: string;
   availability: string;
-  price?: string;
-  genre?: string;
-  area?: string;
-  extractionNote?: string;
+  price?: string | null;
+  genre?: string | null;
+  area?: string | null;
+  extractionNote?: string | null;
   evaluationReason?: string;
   rawPayload?: unknown;
 }

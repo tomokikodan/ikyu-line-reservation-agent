@@ -10,6 +10,10 @@ describe("ranked candidates schema", () => {
           name: "テスト",
           url: "https://restaurant.ikyu.com/123456/",
           availability: "空席あり",
+          price: null,
+          genre: null,
+          area: null,
+          extractionNote: null,
           evaluationReason: "条件に合う"
         }
       ]
@@ -27,6 +31,10 @@ describe("ranked candidates schema", () => {
             name: "テスト",
             url: "not-a-url",
             availability: "空席あり",
+            price: null,
+            genre: null,
+            area: null,
+            extractionNote: null,
             evaluationReason: "条件に合う"
           }
         ]

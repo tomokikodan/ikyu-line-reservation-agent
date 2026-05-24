@@ -187,7 +187,7 @@ export class IkyuRestaurantBrowser {
 
   private async fillFirstVisible(
     page: Page,
-    attempts: Array<{ selector: string; value?: string }>
+    attempts: Array<{ selector: string; value?: string | null }>
   ): Promise<void> {
     for (const attempt of attempts) {
       if (!attempt.value) continue;

@@ -37,7 +37,7 @@ export class OpenAiService implements AiService {
         {
           role: "system",
           content:
-            "You extract restaurant reservation requirements from Japanese LINE messages. Return only facts stated or strongly implied. Dates must be normalized to YYYY-MM-DD in Asia/Tokyo when possible. Times must be HH:mm. Required fields are date, time, partySize, area. Add missing required fields to missingFields. Keep preferences as concise Japanese strings."
+            "You extract restaurant reservation requirements from Japanese LINE messages. Return only facts stated or strongly implied. Dates must be normalized to YYYY-MM-DD in Asia/Tokyo when possible. Times must be HH:mm. Required fields are date, time, partySize, area. Add missing required fields to missingFields. Use null for unknown scalar fields. Keep preferences as concise Japanese strings. Set originalText to the user's message verbatim."
         },
         {
           role: "user",
@@ -65,7 +65,16 @@ export class OpenAiService implements AiService {
   }): Promise<RankedCandidate[]> {
     if (input.candidates.length === 0) return [];
 
-    const sanitized = input.candidates.map((candidate) => CandidateSchema.parse(candidate));
+    const sanitized = input.candidates.map((candidate) =>
+      CandidateSchema.parse({
+        ...candidate,
+        availability: candidate.availability ?? "不明",
+        price: candidate.price ?? null,
+        genre: candidate.genre ?? null,
+        area: candidate.area ?? null,
+        extractionNote: candidate.extractionNote ?? null
+      })
+    );
     const response = await this.getClient().responses.parse({
       model: config.OPENAI_MODEL,
       input: [
