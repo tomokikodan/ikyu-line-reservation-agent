@@ -34,7 +34,8 @@ function fakeRepos() {
       status: "queued",
       intent
     })),
-    getCandidateByJobRank: vi.fn(async () => undefined)
+    getCandidateByJobRank: vi.fn(async () => undefined),
+    appendAuditLog: vi.fn(async () => undefined)
   };
 }
 
@@ -96,5 +97,23 @@ describe("ConversationService", () => {
 
     expect(line.replies[0].messages[0].text).toContain("番号");
     expect(jobs.enqueueBooking).not.toHaveBeenCalled();
+  });
+
+  it("replies with a clear message when OpenAI quota is exhausted", async () => {
+    const repos = fakeRepos();
+    const line = new FakeLine();
+    const ai: AiService = {
+      extractIntent: vi.fn(async () => {
+        throw Object.assign(new Error("quota exceeded"), { code: "insufficient_quota" });
+      }),
+      rankCandidates: vi.fn()
+    };
+    const jobs = { enqueueSearch: vi.fn(), enqueueBooking: vi.fn() };
+    const service = new ConversationService({ repos: repos as never, line, ai, jobs: jobs as never });
+
+    await service.handleText({ lineUserId: "U1", replyToken: "reply", text: "明日の豊田市付近で" });
+
+    expect(line.replies[0].messages[0].text).toContain("OpenAI APIの利用枠不足");
+    expect(jobs.enqueueSearch).not.toHaveBeenCalled();
   });
 });

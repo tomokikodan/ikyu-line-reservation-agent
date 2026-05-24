@@ -38,11 +38,33 @@ export class ConversationService {
       return;
     }
 
-    const extracted = await this.deps.ai.extractIntent({
-      text: input.text,
-      previousIntent: conversation.intent,
-      nowIso: new Date().toISOString()
-    });
+    let extracted: ReservationIntent;
+    try {
+      extracted = await this.deps.ai.extractIntent({
+        text: input.text,
+        previousIntent: conversation.intent,
+        nowIso: new Date().toISOString()
+      });
+    } catch (error) {
+      const reply = this.formatIntentExtractionError(error);
+      await this.deps.line.reply(input.replyToken, [{ type: "text", text: reply }]);
+      await this.deps.repos.appendMessage({
+        lineUserId: input.lineUserId,
+        direction: "outbound",
+        messageType: "text",
+        text: reply,
+        rawPayload: { reason: "intent_extraction_failed" }
+      });
+      await this.deps.repos.appendAuditLog({
+        lineUserId: input.lineUserId,
+        eventType: "intent_extraction_failed",
+        details: {
+          error: error instanceof Error ? error.message : String(error),
+          code: this.getErrorCode(error)
+        }
+      });
+      return;
+    }
     const intent = mergeIntent(conversation.intent, normalizeIntent(extracted));
     const missing = intent.missingFields[0];
 
@@ -128,5 +150,20 @@ export class ConversationService {
     if (config.NODE_ENV !== "test") {
       console.log(`Booking task queued for ${lineUserId}: candidate ${candidate.id}`);
     }
+  }
+
+  private formatIntentExtractionError(error: unknown): string {
+    const code = this.getErrorCode(error);
+    if (code === "insufficient_quota") {
+      return "すみません。OpenAI APIの利用枠不足で条件解析が止まっています。OpenAI PlatformのBilling/Usageで課金設定または利用上限を確認してください。設定後、同じ文章をもう一度送ってください。";
+    }
+    return "すみません。予約条件の解析中にエラーが起きました。少し時間を置いて、もう一度送ってください。";
+  }
+
+  private getErrorCode(error: unknown): string | undefined {
+    if (!error || typeof error !== "object") return undefined;
+    const maybeError = error as { code?: unknown; type?: unknown; error?: { code?: unknown; type?: unknown } };
+    const code = maybeError.code ?? maybeError.error?.code ?? maybeError.type ?? maybeError.error?.type;
+    return typeof code === "string" ? code : undefined;
   }
 }
