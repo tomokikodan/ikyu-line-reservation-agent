@@ -101,7 +101,12 @@ export function createApp(deps?: {
       res.status(401).json({ ok: false });
       return;
     }
-    res.json(await repos.getJobReport(req.params.id));
+    const jobId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!jobId) {
+      res.status(400).json({ ok: false, error: "Missing job id" });
+      return;
+    }
+    res.json(await repos.getJobReport(jobId));
   });
 
   async function handleEvent(event: LineWebhookEvent): Promise<void> {
