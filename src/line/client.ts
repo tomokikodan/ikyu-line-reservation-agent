@@ -11,8 +11,6 @@ export interface LineClient {
 }
 
 export class HttpLineClient implements LineClient {
-  private readonly accessToken = requireEnv("LINE_CHANNEL_ACCESS_TOKEN");
-
   async reply(replyToken: string, messages: LineMessage[]): Promise<void> {
     await this.request("https://api.line.me/v2/bot/message/reply", {
       replyToken,
@@ -31,7 +29,7 @@ export class HttpLineClient implements LineClient {
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.accessToken}`,
+        Authorization: `Bearer ${requireEnv("LINE_CHANNEL_ACCESS_TOKEN")}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify(body)

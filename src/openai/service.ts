@@ -17,16 +17,21 @@ export interface AiService {
 }
 
 export class OpenAiService implements AiService {
-  private readonly client = new OpenAI({
-    apiKey: requireEnv("OPENAI_API_KEY")
-  });
+  private client?: OpenAI;
+
+  private getClient(): OpenAI {
+    this.client ??= new OpenAI({
+      apiKey: requireEnv("OPENAI_API_KEY")
+    });
+    return this.client;
+  }
 
   async extractIntent(input: {
     text: string;
     previousIntent?: Partial<ReservationIntent>;
     nowIso: string;
   }): Promise<ReservationIntent> {
-    const response = await this.client.responses.parse({
+    const response = await this.getClient().responses.parse({
       model: config.OPENAI_MODEL,
       input: [
         {
@@ -61,7 +66,7 @@ export class OpenAiService implements AiService {
     if (input.candidates.length === 0) return [];
 
     const sanitized = input.candidates.map((candidate) => CandidateSchema.parse(candidate));
-    const response = await this.client.responses.parse({
+    const response = await this.getClient().responses.parse({
       model: config.OPENAI_MODEL,
       input: [
         {
